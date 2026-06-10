@@ -1,232 +1,315 @@
-# EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework
+# Qwen2.5-VL-3B GRPO Reproduction with EasyR1
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/hiyouga/EasyR1)](https://github.com/hiyouga/EasyR1/stargazers)
-[![Twitter](https://img.shields.io/twitter/follow/llamafactory_ai)](https://twitter.com/llamafactory_ai)
-[![Docker Pulls](https://img.shields.io/docker/pulls/hiyouga/verl)](https://hub.docker.com/r/hiyouga/verl/tags)
+[English](README.md) | [简体中文](README_zh.md)
 
-### Used by [Amazon Web Services](https://aws.amazon.com/cn/blogs/china/building-llm-model-hub-based-on-llamafactory-and-easyr1/)
+This repository reproduces the GRPO training workflow for
+[Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
+on the [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) dataset.
+It is built on [EasyR1](https://github.com/hiyouga/EasyR1), with a training
+configuration optimized for two NVIDIA A40 48 GB GPUs.
 
-This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
+The default experiment uses full-parameter BF16 training, vLLM rollout,
+FSDP, rule-based rewards, Weights & Biases tracking, local logging, automatic
+GPU waiting, and before/after generation comparison.
 
-EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://arxiv.org/abs/2409.19256)** and the latest release of **[vLLM](https://github.com/vllm-project/vllm)**'s SPMD mode.
+## Training Overview
 
-## Features
+For each prompt, the current policy generates four candidate responses.
+The reward function evaluates answer accuracy and output format. GRPO
+normalizes rewards within each response group and updates the policy without
+training an additional critic model. A KL penalty limits excessive deviation
+from the reference policy.
 
-- Supported models
-  - Llama3/Qwen2/Qwen2.5/Qwen3 language models
-  - Qwen2-VL/Qwen2.5-VL/Qwen3-VL vision language models
-  - DeepSeek-R1 distill models
+The expected response format is:
 
-- Supported algorithms
-  - GRPO
-  - DAPO ![new](https://img.shields.io/badge/new-orange)
-  - Reinforce++
-  - ReMax
-  - RLOO
-  - GSPO ![new](https://img.shields.io/badge/new-orange)
-  - CISPO ![new](https://img.shields.io/badge/new-orange)
+```text
+<think>reasoning process</think><answer>final answer</answer>
+```
 
-- Supported datasets
-  - Any text, vision-text dataset in a [specific format](#custom-dataset)
+Main components:
 
-- Supported tricks
-  - Padding-free training
-  - LoRA training ![new](https://img.shields.io/badge/new-orange)
-  - Resuming from the latest/best checkpoint
-  - Wandb & SwanLab & Mlflow & Tensorboard tracking
+- Model: `Qwen/Qwen2.5-VL-3B-Instruct`
+- Dataset: `hiyouga/geometry3k`
+- Algorithm: GRPO
+- Precision: BF16
+- Training mode: full-parameter fine-tuning
+- Distributed strategy: FSDP on two GPUs
+- Rollout engine: vLLM
+- Reward: answer accuracy and response format
+- Tracking: local JSONL logs and Weights & Biases
 
 ## Requirements
 
-### Software Requirements
-
+- Linux
 - Python 3.9+
-- transformers>=4.54.0
-- flash-attn>=2.4.3
-- vllm>=0.8.3
+- NVIDIA GPUs with BF16 support
+- CUDA environment compatible with PyTorch, FlashAttention, and vLLM
+- Two A40 48 GB GPUs are the default target
 
-We provide a [Dockerfile](./Dockerfile) to easily build environments.
+The upstream EasyR1 hardware table estimates that Qwen2.5-VL-3B full
+fine-tuning requires `1 x 40 GB` in BF16. Actual memory usage depends on image
+resolution, prompt length, response length, and rollout settings.
 
-We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
+## Installation
+
+Using the prebuilt EasyR1 image is recommended:
 
 ```bash
 docker pull hiyouga/verl:ngc-th2.8.0-cu12.9-vllm0.11.0
-docker run -it --ipc=host --gpus=all hiyouga/verl:ngc-th2.8.0-cu12.9-vllm0.11.0
+docker run -it --ipc=host --gpus=all \
+  -v "$PWD":/workspace/Qwen2.5-VL-3B-GRPO \
+  hiyouga/verl:ngc-th2.8.0-cu12.9-vllm0.11.0
 ```
 
-If your environment does not support Docker, you can consider using **Apptainer**:
+Alternatively, install the project in an existing compatible environment:
 
 ```bash
-apptainer pull easyr1.sif docker://hiyouga/verl:ngc-th2.8.0-cu12.9-vllm0.11.0
-apptainer shell --nv --cleanenv --bind /mnt/your_dir:/mnt/your_dir easyr1.sif
-```
-
-Use `USE_MODELSCOPE_HUB=1` to download models from the ModelScope hub.
-
-### Hardware Requirements
-
-\* *estimated*
-
-| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B   |   72B   |
-| ------------------------ | ---- | ------ | ------ | ------ | ------- | ------- |
-| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB | 32*80GB |
-| GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB | 16*80GB |
-| GRPO LoRA Fine-Tuning    |  AMP | 1*12GB | 1*24GB | 2*32GB |  2*80GB |  4*80GB |
-
-> [!NOTE]
-> Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
-
-## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
-
-![image](assets/qwen2_5_vl_7b_geo.png)
-
-### Installation
-
-```bash
-git clone https://github.com/hiyouga/EasyR1.git
-cd EasyR1
+git clone https://github.com/k-irona/Qwen2.5-VL-3B-GRPO.git
+cd Qwen2.5-VL-3B-GRPO
 pip install -e .
 ```
 
-### GRPO Full Training
+If Hugging Face access is unavailable:
 
 ```bash
-bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
+export HF_ENDPOINT=https://hf-mirror.com
 ```
 
-### GRPO LoRA Training
+## Quick Start
+
+Log in once if you want online visualization:
 
 ```bash
-bash examples/qwen3_vl_4b_geo3k_grpo_lora.sh
+wandb login
 ```
 
-### Merge Checkpoint in Hugging Face Format
+Run a 10-step smoke test on physical GPUs 4 and 5:
 
 ```bash
-python3 scripts/model_merger.py --local_dir checkpoints/easy_r1/exp_name/global_step_1/actor
+CUDA_VISIBLE_DEVICES=4,5 \
+bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
+trainer.max_steps=10
 ```
 
-> [!TIP]
-> If you encounter issues with connecting to Hugging Face, consider using `export HF_ENDPOINT=https://hf-mirror.com`.
->
-> If you want to use SwanLab logger, consider using `bash examples/qwen2_5_vl_7b_geo3k_swanlab.sh`.
-
-## Custom Dataset
-
-Please refer to the example datasets to prepare your own dataset.
-
-- Text dataset: https://huggingface.co/datasets/hiyouga/math12k
-- Image-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
-- Multi-image-text dataset: https://huggingface.co/datasets/hiyouga/journeybench-multi-image-vqa
-- Text-image mixed dataset: https://huggingface.co/datasets/hiyouga/rl-mixed-dataset
-
-## How to Understand GRPO in EasyR1
-
-![image](assets/easyr1_grpo.png)
-
-- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.16.1/en/grpo_trainer).
-
-## How to Run 70B+ Model in Multi-node Environment
-
-1. Start the Ray head node.
+Start the full experiment:
 
 ```bash
-ray start --head --port=6379 --dashboard-host=0.0.0.0
+CUDA_VISIBLE_DEVICES=4,5 \
+bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
-2. Start the Ray worker node and connect to the head node.
+The selected physical GPUs are remapped to logical devices `0,1` inside the
+training process.
+
+## Default Configuration
+
+| Parameter | Default | Description |
+| --- | ---: | --- |
+| `N_GPUS` | 2 | Number of training GPUs |
+| `ROLLOUT_BATCH_SIZE` | 32 | Prompts collected for each rollout batch |
+| `GLOBAL_BATCH_SIZE` | 16 | Actor update minibatch size |
+| `ROLLOUT_N` | 4 | Candidate responses generated per prompt |
+| `MAX_PROMPT_LENGTH` | 2048 | Maximum prompt token length |
+| `MAX_RESPONSE_LENGTH` | 512 | Maximum generated token length |
+| `MAX_PIXELS` | 524288 | Maximum pixels per input image |
+| `GPU_MEMORY_UTILIZATION` | 0.5 | vLLM GPU memory utilization |
+| `LEARNING_RATE` | `1e-6` | Full-parameter actor learning rate |
+| `KL_COEF` | `1e-2` | KL regularization coefficient |
+| `LORA_RANK` | 0 | `0` disables LoRA and enables full fine-tuning |
+| `TOTAL_EPOCHS` | 15 | Number of training epochs |
+| `VAL_FREQ` | 5 | Validation interval in steps |
+| `SAVE_FREQ` | 5 | Checkpoint interval in steps |
+
+All values can be overridden through environment variables:
 
 ```bash
-ray start --address=<head_node_ip>:6379
+CUDA_VISIBLE_DEVICES=4,5 \
+ROLLOUT_BATCH_SIZE=16 \
+GLOBAL_BATCH_SIZE=8 \
+MAX_RESPONSE_LENGTH=384 \
+MAX_PIXELS=393216 \
+GPU_MEMORY_UTILIZATION=0.45 \
+bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
-3. Check the Ray resource pool.
+Additional OmegaConf overrides can be appended to the command:
 
 ```bash
-ray status
+bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
+trainer.max_steps=100 \
+trainer.val_freq=25
 ```
 
-4. Run training script on the Ray head node only.
+## Automatic GPU Waiting
+
+The waiting script monitors GPU memory and utilization. It starts training
+after the same two GPUs remain free for three consecutive checks.
+
+Wait for any two GPUs:
 
 ```bash
-bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
+nohup bash scripts/wait_for_gpus_and_train.sh \
+  > wait_for_gpus.log 2>&1 &
 ```
 
-See the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for more details about multi-node training and Ray debugger.
+Only select GPUs from a specified set:
 
-## Other Baselines
+```bash
+GPU_CANDIDATES=4,5,6,7 \
+nohup bash scripts/wait_for_gpus_and_train.sh \
+  > wait_for_gpus.log 2>&1 &
+```
 
-We also reproduced the following two baselines of the [R1-V](https://github.com/deep-agent/R1-V) project.
-- [CLEVR-70k-Counting](examples/baselines/qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
-- [GeoQA-8k](examples/baselines/qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
+Monitor the process:
 
-## Performance Baselines
+```bash
+tail -f wait_for_gpus.log
+```
 
-See [baselines.md](assets/baselines.md).
+Default idle conditions:
 
-## Awesome Work using EasyR1
+- Used memory below 2000 MiB
+- GPU utilization below 10%
+- Check interval of 60 seconds
+- Three consecutive successful checks
 
-- **MMR1**: Enhancing Multimodal Reasoning with Variance-Aware Sampling and Open Resources. [![[code]](https://img.shields.io/github/stars/LengSicong/MMR1)](https://github.com/LengSicong/MMR1) [![[arxiv]](https://img.shields.io/badge/arxiv-2509.21268-blue)](https://arxiv.org/abs/2509.21268)
-- **Vision-R1**: Incentivizing Reasoning Capability in Multimodal Large Language Models. [![[code]](https://img.shields.io/github/stars/Osilly/Vision-R1)](https://github.com/Osilly/Vision-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06749-blue)](https://arxiv.org/abs/2503.06749)
-- **Seg-Zero**: Reasoning-Chain Guided Segmentation via Cognitive Reinforcement. [![[code]](https://img.shields.io/github/stars/dvlab-research/Seg-Zero)](https://github.com/dvlab-research/Seg-Zero) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06520-blue)](https://arxiv.org/abs/2503.06520)
-- **MetaSpatial**: Reinforcing 3D Spatial Reasoning in VLMs for the Metaverse. [![[code]](https://img.shields.io/github/stars/PzySeere/MetaSpatial)](https://github.com/PzySeere/MetaSpatial) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.18470-blue)](https://arxiv.org/abs/2503.18470)
-- **Temporal-R1**: Envolving Temporal Reasoning Capability into LMMs via Temporal Consistent Reward. [![[code]](https://img.shields.io/github/stars/appletea233/Temporal-R1)](https://github.com/appletea233/Temporal-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2506.01908-blue)](https://arxiv.org/abs/2506.01908)
-- **NoisyRollout**: Reinforcing Visual Reasoning with Data Augmentation. [![[code]](https://img.shields.io/github/stars/John-AI-Lab/NoisyRollout)](https://github.com/John-AI-Lab/NoisyRollout) [![[arxiv]](https://img.shields.io/badge/arxiv-2504.13055-blue)](https://arxiv.org/pdf/2504.13055)
-- **GUI-R1**: A Generalist R1-Style Vision-Language Action Model For GUI Agents. [![[code]](https://img.shields.io/github/stars/ritzz-ai/GUI-R1)](https://github.com/ritzz-ai/GUI-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2504.10458-blue)](https://arxiv.org/abs/2504.10458)
-- **FAST-GRPO**: Fast-Slow Thinking framework that dynamically adapts reasoning depth based on question characteristics. [![[code]](https://img.shields.io/github/stars/Mr-Loevan/FAST)](https://github.com/Mr-Loevan/FAST) [![[arxiv]](https://img.shields.io/badge/arxiv-2504.18458-blue)](https://arxiv.org/abs/2504.18458)
-- **R1-Track**: Direct Application of MLLMs to Visual Object Tracking via Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/Wangbiao2/R1-Track)](https://github.com/Wangbiao2/R1-Track)
-- **VisionReasoner**: Unified Visual Perception and Reasoning via Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/dvlab-research/VisionReasoner)](https://github.com/dvlab-research/VisionReasoner) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.12081-blue)](https://arxiv.org/abs/2505.12081)
-- **MM-UPT**: Unsupervised Post-Training for Multi-Modal LLM Reasoning via GRPO. [![[code]](https://img.shields.io/github/stars/waltonfuture/MM-UPT)](https://github.com/waltonfuture/MM-UPT) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.22453-blue)](https://arxiv.org/pdf/2505.22453)
-- **RL-with-Cold-Start**: Advancing Multimodal Reasoning via Reinforcement Learning with Cold Start. [![[code]](https://img.shields.io/github/stars/waltonfuture/RL-with-Cold-Start)](https://github.com/waltonfuture/RL-with-Cold-Start) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.22334-blue)](https://arxiv.org/pdf/2505.22334)
-- **ViGoRL**: Grounded Reinforcement Learning for Visual Reasoning. [![[code]](https://img.shields.io/github/stars/Gabesarch/grounded-rl)](https://github.com/Gabesarch/grounded-rl) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.22334-blue)](https://arxiv.org/abs/2505.23678)
-- **Revisual-R1**: Advancing Multimodal Reasoning: From Optimized Cold Start to Staged Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/CSfufu/Revisual-R1)](https://github.com/CSfufu/Revisual-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2506.04207-blue)](https://arxiv.org/abs/2506.04207)
-- **SophiaVL-R1**: Reinforcing MLLMs Reasoning with Thinking Reward. [![[code]](https://img.shields.io/github/stars/kxfan2002/SophiaVL-R1)](https://github.com/kxfan2002/SophiaVL-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.17018-blue)](https://arxiv.org/abs/2505.17018)
-- **Vision-Matters**: Simple Visual Perturbations Can Boost Multimodal Math Reasoning. [![[code]](https://img.shields.io/github/stars/YutingLi0606/Vision-Matters)](https://github.com/YutingLi0606/Vision-Matters) [![[arxiv]](https://img.shields.io/badge/arxiv-2506.09736-blue)](https://arxiv.org/abs/2506.09736)
-- **VTool-R1**: VLMs Learn to Think with Images via Reinforcement Learning on Multimodal Tool Use. [![[code]](https://img.shields.io/github/stars/VTOOL-R1/vtool-r1)](https://github.com/VTOOL-R1/vtool-r1) [![[arxiv]](https://img.shields.io/badge/arxiv-2505.19255-blue)](https://arxiv.org/abs/2505.19255)
-- **Long-RL**: Scaling RL to Long Sequences. [![[code]](https://img.shields.io/github/stars/NVlabs/Long-RL)](https://github.com/NVlabs/Long-RL) [![[arxiv]](https://img.shields.io/badge/arxiv-2507.07966-blue)](https://arxiv.org/abs/2507.07966)
-- **EditGRPO**: Reinforcement Learning with Post-Rollout Edits for Clinically Accurate Chest X-Ray Report Generation. [![[code]](https://img.shields.io/github/stars/taokz/EditGRPO)](https://github.com/taokz/EditGRPO)
-- **ARES**: Multimodal Adaptive Reasoning via Difficulty-Aware Token-Level Entropy Shaping. [![[code]](https://img.shields.io/github/stars/shawn0728/ARES)](https://github.com/shawn0728/ARES) [![[arxiv]](https://img.shields.io/badge/arxiv-2510.08457-blue)](https://arxiv.org/abs/2510.08457)
-- **VPPO**: Spotlight on Token Perception for Multimodal Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/huaixuheqing/VPPO-RL)](https://github.com/huaixuheqing/VPPO-RL) [![[arxiv]](https://img.shields.io/badge/arxiv-2510.09285-blue)](https://arxiv.org/abs/2510.09285)
-- **IE-Critic-R1**: Advancing the Explanatory Measurement of Text-Driven Image Editing for Human Perception Alignment. [![[code]](https://img.shields.io/github/stars/Coobiw/IE-Critic-R1)](https://github.com/Coobiw/IE-Critic-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2511.18055-blue)](https://arxiv.org/abs/2511.18055)
-- **OneThinker**: All-in-one Reasoning Model for Image and Video. [![[code]](https://img.shields.io/github/stars/tulerfeng/OneThinker)](https://github.com/tulerfeng/OneThinker) [![[arxiv]](https://img.shields.io/badge/arxiv-2512.03043-blue)](https://arxiv.org/abs/2512.03043)
-- **MetaphorStar**: Image Metaphor Understanding and Reasoning with End-to-End Visual Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/MING-ZCH/MetaphorStar)](https://github.com/MING-ZCH/MetaphorStar) [![[arxiv]](https://img.shields.io/badge/arxiv-2602.10575-blue)](https://arxiv.org/abs/2602.10575)
+These can be changed with `MAX_MEMORY_USED_MB`, `MAX_GPU_UTILIZATION`,
+`POLL_INTERVAL_SECONDS`, and `REQUIRED_FREE_CHECKS`.
 
-## TODO
+This script cannot reserve GPUs against other users. Use Slurm or another
+cluster scheduler when one is available.
 
-- Support ulysses parallelism for VLMs (middle priority).
-- Support more VLM architectures.
+## Visualization
 
-> [!NOTE]
-> We will not provide scripts for supervised fine-tuning and inference in this project. If you have such requirements, we recommend using [LlamaFactory](https://github.com/hiyouga/LlamaFactory).
+### Weights & Biases
 
-### Known bugs
+The default logger configuration is:
 
-These features are temporarily disabled for now, we plan to fix them one-by-one in the future updates.
+```text
+['file', 'wandb']
+```
 
-- Vision language models are not compatible with ulysses parallelism yet.
+After training starts, open [wandb.ai](https://wandb.ai/) and find:
 
-## Discussion Group
+- Project: `easy_r1`
+- Run: `qwen2_5_vl_3b_geo_grpo_a40_bf16`
 
-👋 Join our [WeChat group](https://github.com/hiyouga/llamafactory-community/blob/main/wechat/easyr1.jpg).
+Recommended metrics:
 
-## FAQs
+- `val/accuracy_reward`
+- `val/reward_score`
+- `val/format_reward`
+- `actor/ppo_kl`
+- `actor/pg_loss`
+- `response_length/clip_ratio`
+- `val/generations`
 
-> ValueError: Image features and image tokens do not match: tokens: 8192, features 9800
+Validation runs at step 0 before training, so the same run contains the
+baseline and trained-model results.
 
-Increase the `data.max_prompt_length` or reduce the `data.max_pixels`.
+### Local HTML Report
 
-> RuntimeError: CUDA Error: out of memory at /workspace/csrc/cumem_allocator.cpp:62
+Training logs are stored in:
 
-Reduce the `worker.rollout.gpu_memory_utilization` and enable `worker.actor.offload.offload_params`.
+```text
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/
+```
 
-> RuntimeError: 0 active drivers ([]). There should only be one.
+Generate the local report:
 
-Uninstall `deepspeed` from the current python environment.
+```bash
+python3 scripts/visualize_training.py \
+  checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16
+```
+
+Output:
+
+```text
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/training_report.html
+```
+
+The report includes metric curves and side-by-side validation generations
+from step 0 and the final recorded validation step.
+
+To disable WandB and keep local logs only:
+
+```bash
+LOGGER="['file']" \
+bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
+```
+
+## Checkpoints
+
+Checkpoints are saved under the experiment directory. Convert an actor
+checkpoint to Hugging Face format with:
+
+```bash
+python3 scripts/model_merger.py \
+  --local_dir checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/global_step_<STEP>/actor
+```
+
+The trainer automatically searches for the latest checkpoint in the same
+experiment directory when `trainer.find_last_checkpoint=true`.
+
+## Memory Tuning
+
+If training runs out of GPU memory, adjust parameters in this order:
+
+1. Set `MAX_PIXELS=393216`.
+2. Set `MAX_RESPONSE_LENGTH=384`.
+3. Set `GPU_MEMORY_UTILIZATION=0.45`.
+4. Keep both micro batch sizes at `1`.
+5. Set `ROLLOUT_BATCH_SIZE=16 GLOBAL_BATCH_SIZE=8`.
+6. Switch to LoRA with `LORA_RANK=32 LEARNING_RATE=1e-5`.
+
+GRPO requires `ROLLOUT_N > 1`. Do not reduce it to one.
+
+## Troubleshooting
+
+### Image features and image tokens do not match
+
+Increase `MAX_PROMPT_LENGTH` or reduce `MAX_PIXELS`.
+
+### CUDA out of memory
+
+Reduce `GPU_MEMORY_UTILIZATION`, `MAX_PIXELS`, and
+`MAX_RESPONSE_LENGTH`. Parameter and optimizer CPU offloading are enabled by
+default in the base configuration.
+
+### WandB authentication blocks unattended training
+
+Run `wandb login` before starting the GPU waiting script, or use:
+
+```bash
+LOGGER="['file']" bash scripts/wait_for_gpus_and_train.sh
+```
+
+### Ray reports no active drivers
+
+Remove conflicting DeepSpeed installations from the environment, as
+recommended by upstream EasyR1.
+
+## Project Files
+
+```text
+examples/qwen2_5_vl_3b_geo3k_grpo.sh  Main GRPO training entry point
+examples/reward_function/r1v.py       Accuracy and format reward
+examples/format_prompt/r1v.jinja      Required reasoning/answer template
+scripts/wait_for_gpus_and_train.sh    Automatic GPU waiting and launch
+scripts/visualize_training.py         Local HTML report generator
+docs/qwen2_5_vl_3b_grpo_zh.md         Additional Chinese tuning notes
+```
+
+## Acknowledgements
+
+This repository is based on
+[EasyR1](https://github.com/hiyouga/EasyR1), which is built on
+[veRL](https://github.com/volcengine/verl). Thanks to the authors and
+contributors of EasyR1, veRL, Qwen2.5-VL, vLLM, and Geometry3K.
 
 ## Citation
 
-Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang), [Zhangchi Feng](https://github.com/BUAADreamer), [Dongdong Kuang](https://github.com/Kuangdd01), Yuwen Xiong and Richong Zhang
-
-We also thank Guangming Sheng and Chi Zhang for helpful discussions.
+Please cite EasyR1 and HybridFlow when this repository is used in research:
 
 ```bibtex
 @misc{zheng2025easyr1,
@@ -235,15 +318,15 @@ We also thank Guangming Sheng and Chi Zhang for helpful discussions.
   howpublished = {\url{https://github.com/hiyouga/EasyR1}},
   year         = {2025}
 }
-```
 
-We recommend to also cite the original work.
-
-```bibtex
 @article{sheng2024hybridflow,
   title   = {HybridFlow: A Flexible and Efficient RLHF Framework},
   author  = {Guangming Sheng and Chi Zhang and Zilingfeng Ye and Xibin Wu and Wang Zhang and Ru Zhang and Yanghua Peng and Haibin Lin and Chuan Wu},
-  year    = {2024},
-  journal = {arXiv preprint arXiv: 2409.19256}
+  journal = {arXiv preprint arXiv:2409.19256},
+  year    = {2024}
 }
 ```
+
+## License
+
+This project follows the upstream Apache License 2.0. See [LICENSE](LICENSE).
