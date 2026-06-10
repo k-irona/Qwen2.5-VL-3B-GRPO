@@ -48,6 +48,10 @@ EasyR1 上游资源表估算 Qwen2.5-VL-3B 全参数 BF16 训练最低约需
 `1 x 40GB`。实际显存峰值取决于图片尺寸、提示长度、生成长度和 rollout
 参数。
 
+基于 Python 3.10、PyTorch 2.8.0 cu126、vLLM 0.11.0 和
+FlashAttention 2.8.3 的已验证 A40 环境配置参见
+[A40_ENVIRONMENT_SETUP_ZH.md](A40_ENVIRONMENT_SETUP_ZH.md)。
+
 ## 安装
 
 推荐使用 EasyR1 预构建镜像：
@@ -62,10 +66,13 @@ docker run -it --ipc=host --gpus=all \
 也可以在已有兼容环境中安装：
 
 ```bash
-git clone https://github.com/k-irona/Qwen2.5-VL-3B-GRPO.git
-cd Qwen2.5-VL-3B-GRPO
+git clone https://github.com/k-irona/Qwen2.5-VL-3B-GRPO-Reproduction-with-EasyR1.git
+cd Qwen2.5-VL-3B-GRPO-Reproduction-with-EasyR1
 pip install -e .
 ```
+
+本仓库固定使用 vLLM 0.11.0。不要安装未固定版本的新版 vLLM，其内部 LoRA
+API 已发生变化，与当前 EasyR1 代码不兼容。
 
 无法直接访问 Hugging Face 时：
 
@@ -85,6 +92,7 @@ wandb login
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
 trainer.max_steps=10
 ```
@@ -93,10 +101,13 @@ trainer.max_steps=10
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
-训练进程内部会将选中的物理 GPU 映射为逻辑设备 `0,1`。
+训练进程内部会将选中的物理 GPU 映射为逻辑设备 `0,1`。当前过滤后的
+Geometry3K 训练 DataLoader 每个 epoch 包含 65 step，因此默认 15 epoch
+约为 975 step。实际总步数应以启动日志中的 `Total training steps` 为准。
 
 ## 默认参数
 
@@ -105,6 +116,8 @@ bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 | `N_GPUS` | 2 | 训练使用的 GPU 数量 |
 | `ROLLOUT_BATCH_SIZE` | 32 | 每轮 rollout 使用的问题数 |
 | `GLOBAL_BATCH_SIZE` | 16 | actor 更新 minibatch 大小 |
+| `MICRO_BATCH_SIZE_UPDATE` | 1 | 每张 GPU 的 actor 更新 micro batch 大小 |
+| `MICRO_BATCH_SIZE_EXPERIENCE` | 1 | 每张 GPU 计算 log-prob 的 micro batch 大小 |
 | `ROLLOUT_N` | 4 | 每个问题生成的候选回答数 |
 | `MAX_PROMPT_LENGTH` | 2048 | 最大提示 token 数 |
 | `MAX_RESPONSE_LENGTH` | 512 | 最大生成 token 数 |
@@ -113,14 +126,18 @@ bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 | `LEARNING_RATE` | `1e-6` | 全参数 actor 学习率 |
 | `KL_COEF` | `1e-2` | KL 正则系数 |
 | `LORA_RANK` | 0 | 0 表示关闭 LoRA，进行全参数训练 |
+| `LORA_ALPHA` | 64 | 启用 LoRA 时的缩放系数 |
 | `TOTAL_EPOCHS` | 15 | 总训练 epoch 数 |
 | `VAL_FREQ` | 5 | 验证间隔 step 数 |
 | `SAVE_FREQ` | 5 | checkpoint 保存间隔 |
+| `LOGGER` | `['file','wandb']` | 启用的日志后端 |
+| `EXPERIMENT_NAME` | `qwen2_5_vl_3b_geo_grpo_a40_bf16` | 实验名和 checkpoint 目录名 |
 
 所有参数均可通过环境变量覆盖：
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 ROLLOUT_BATCH_SIZE=16 \
 GLOBAL_BATCH_SIZE=8 \
 MAX_RESPONSE_LENGTH=384 \

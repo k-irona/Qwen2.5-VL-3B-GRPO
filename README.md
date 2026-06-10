@@ -50,6 +50,10 @@ The upstream EasyR1 hardware table estimates that Qwen2.5-VL-3B full
 fine-tuning requires `1 x 40 GB` in BF16. Actual memory usage depends on image
 resolution, prompt length, response length, and rollout settings.
 
+For the verified A40 environment based on Python 3.10, PyTorch 2.8.0 cu126,
+vLLM 0.11.0, and FlashAttention 2.8.3, see
+[A40_ENVIRONMENT_SETUP_ZH.md](A40_ENVIRONMENT_SETUP_ZH.md).
+
 ## Installation
 
 Using the prebuilt EasyR1 image is recommended:
@@ -64,10 +68,13 @@ docker run -it --ipc=host --gpus=all \
 Alternatively, install the project in an existing compatible environment:
 
 ```bash
-git clone https://github.com/k-irona/Qwen2.5-VL-3B-GRPO.git
-cd Qwen2.5-VL-3B-GRPO
+git clone https://github.com/k-irona/Qwen2.5-VL-3B-GRPO-Reproduction-with-EasyR1.git
+cd Qwen2.5-VL-3B-GRPO-Reproduction-with-EasyR1
 pip install -e .
 ```
+
+This repository is pinned to vLLM 0.11.0. Installing an unpinned newer vLLM
+release is not supported because its internal LoRA API has changed.
 
 If Hugging Face access is unavailable:
 
@@ -87,6 +94,7 @@ Run a 10-step smoke test on physical GPUs 4 and 5:
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
 trainer.max_steps=10
 ```
@@ -95,11 +103,15 @@ Start the full experiment:
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
 The selected physical GPUs are remapped to logical devices `0,1` inside the
-training process.
+training process. With the current filtered Geometry3K dataset, the training
+dataloader contains 65 steps per epoch, so the default 15 epochs run for about
+975 steps. Always use the `Total training steps` value printed at startup as
+the authoritative count.
 
 ## Default Configuration
 
@@ -108,6 +120,8 @@ training process.
 | `N_GPUS` | 2 | Number of training GPUs |
 | `ROLLOUT_BATCH_SIZE` | 32 | Prompts collected for each rollout batch |
 | `GLOBAL_BATCH_SIZE` | 16 | Actor update minibatch size |
+| `MICRO_BATCH_SIZE_UPDATE` | 1 | Per-device micro batch size for actor updates |
+| `MICRO_BATCH_SIZE_EXPERIENCE` | 1 | Per-device micro batch size for log-prob computation |
 | `ROLLOUT_N` | 4 | Candidate responses generated per prompt |
 | `MAX_PROMPT_LENGTH` | 2048 | Maximum prompt token length |
 | `MAX_RESPONSE_LENGTH` | 512 | Maximum generated token length |
@@ -116,14 +130,18 @@ training process.
 | `LEARNING_RATE` | `1e-6` | Full-parameter actor learning rate |
 | `KL_COEF` | `1e-2` | KL regularization coefficient |
 | `LORA_RANK` | 0 | `0` disables LoRA and enables full fine-tuning |
+| `LORA_ALPHA` | 64 | LoRA scaling factor when LoRA is enabled |
 | `TOTAL_EPOCHS` | 15 | Number of training epochs |
 | `VAL_FREQ` | 5 | Validation interval in steps |
 | `SAVE_FREQ` | 5 | Checkpoint interval in steps |
+| `LOGGER` | `['file','wandb']` | Enabled logging backends |
+| `EXPERIMENT_NAME` | `qwen2_5_vl_3b_geo_grpo_a40_bf16` | Run and checkpoint directory name |
 
 All values can be overridden through environment variables:
 
 ```bash
 CUDA_VISIBLE_DEVICES=4,5 \
+N_GPUS=2 \
 ROLLOUT_BATCH_SIZE=16 \
 GLOBAL_BATCH_SIZE=8 \
 MAX_RESPONSE_LENGTH=384 \
