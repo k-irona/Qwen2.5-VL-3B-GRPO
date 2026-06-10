@@ -213,7 +213,7 @@ TOTAL_EPOCHS=15
 ```
 ### 查看训练详情
 ```
-export RUN_DIR="$REPO_DIR/checkpoints/$WANDB_PROJECT_NAME/qwen2_5_vl_3b_geo_grpo_3090_smoke10"
+export RUN_DIR="$REPO_DIR/checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_smoke10"
 tail -f "$RUN_DIR/experiment_log.jsonl"
 ```
 查看最新一步：
