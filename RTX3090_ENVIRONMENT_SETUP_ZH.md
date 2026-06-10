@@ -1,13 +1,14 @@
 # 基于 EasyR1 的 Qwen2.5-VL-3B GRPO 训练
 
 ### 使用集群
-NVIDIA A40 2x 或 4x
--  GPU memory：48GB per GPU
--  GPU architecture：Ampere
--  Compute capability：8.0
--  推荐 NVIDIA Driver：560.28.03 或更高版本
+NVIDIA GeForce RTX 3090 8x，训练使用 GPU 0-3
+- GPU memory：24GB per GPU
+- GPU architecture：Ampere
+- Compute capability：8.6
+- NVIDIA Driver Version：530.30.02
+- `nvidia-smi` CUDA Version：12.1
 
-本文使用 PyTorch 2.8.0 cu126、vLLM 0.11.0 和 FlashAttention 2.8.3。CUDA 12.6 在 Linux 上随 Toolkit 发布的驱动版本为 560.28.03；使用 CUDA 12.x minor version compatibility 时最低驱动要求为 525.60.13。
+本文实际使用 4 张 RTX 3090、PyTorch 2.8.0 cu126、Conda CUDA Toolkit 12.6、vLLM 0.11.0 和 FlashAttention 2.8.3。`nvidia-smi` 显示的 CUDA 12.1 表示驱动报告的 CUDA 兼容能力，不是当前 Conda 环境中 PyTorch runtime 或 `nvcc` 的版本；后两者均为 12.6。驱动 530.30.02 满足 CUDA 12.x minor version compatibility 的最低要求。
 
 检查集群：
 ```
@@ -121,7 +122,7 @@ pip install flash-attn==2.8.3 \
 --no-build-isolation \
 --no-cache-dir
 ```
-A40 是 Ampere，使用 `FLASH_ATTN_CUDA_ARCHS=80`。源码编译建议准备至少 30GB 临时空间，不要使用空间不足的系统 `/tmp`。
+RTX 3090 是 Ampere。FlashAttention 2.8.3 的 Ampere 构建使用 `FLASH_ATTN_CUDA_ARCHS=80`。源码编译建议准备至少 30GB 临时空间，不要使用空间不足的系统 `/tmp`。
 另一个终端查看编译进度：
 ```
 watch -n 2 "
@@ -180,21 +181,7 @@ https://wandb.ai/<wandb-entity>/<project-name>
 ray stop --force
 unset LD_LIBRARY_PATH
 ```
-2 张 A40：
-```
-WANDB_ENTITY="$WANDB_ENTITY" \
-HF_ENDPOINT="$HF_ENDPOINT" \
-HF_HOME="$HF_HOME" \
-CUDA_VISIBLE_DEVICES=0,1 \
-MODEL_PATH="$MODEL_DIR" \
-N_GPUS=2 \
-EXPERIMENT_NAME=qwen2_5_vl_3b_geo_grpo_a40_smoke10 \
-LOGGER="['file','wandb']" \
-bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
-trainer.project_name="'$WANDB_PROJECT_NAME'" \
-trainer.max_steps=10
-```
-4 张 A40：
+4 张 RTX 3090：
 ```
 WANDB_ENTITY="$WANDB_ENTITY" \
 HF_ENDPOINT="$HF_ENDPOINT" \
@@ -202,7 +189,7 @@ HF_HOME="$HF_HOME" \
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 MODEL_PATH="$MODEL_DIR" \
 N_GPUS=4 \
-EXPERIMENT_NAME=qwen2_5_vl_3b_geo_grpo_a40_smoke10 \
+EXPERIMENT_NAME=qwen2_5_vl_3b_geo_grpo_3090_smoke10 \
 LOGGER="['file','wandb']" \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
 trainer.project_name="'$WANDB_PROJECT_NAME'" \
@@ -226,7 +213,7 @@ TOTAL_EPOCHS=15
 ```
 ### 查看训练详情
 ```
-export RUN_DIR="$REPO_DIR/checkpoints/$WANDB_PROJECT_NAME/qwen2_5_vl_3b_geo_grpo_a40_smoke10"
+export RUN_DIR="$REPO_DIR/checkpoints/$WANDB_PROJECT_NAME/qwen2_5_vl_3b_geo_grpo_3090_smoke10"
 tail -f "$RUN_DIR/experiment_log.jsonl"
 ```
 查看最新一步：
@@ -278,10 +265,10 @@ unset LD_LIBRARY_PATH
 WANDB_ENTITY="$WANDB_ENTITY" \
 HF_ENDPOINT="$HF_ENDPOINT" \
 HF_HOME="$HF_HOME" \
-CUDA_VISIBLE_DEVICES=0,1 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
 MODEL_PATH="$MODEL_DIR" \
-N_GPUS=2 \
-EXPERIMENT_NAME=qwen2_5_vl_3b_geo_grpo_a40_full \
+N_GPUS=4 \
+EXPERIMENT_NAME=qwen2_5_vl_3b_geo_grpo_3090_full \
 LOGGER="['file','wandb']" \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
 trainer.project_name="'$WANDB_PROJECT_NAME'"

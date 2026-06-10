@@ -19,8 +19,10 @@ Conda 环境：
 ## 已确认的硬件
 
 - 当前机器有 8 张 GPU 可见。
-- 当前计划使用 4 张 RTX 3090 24GB。
+- 8 张 GPU 均为 RTX 3090 24GB，当前训练使用 GPU 0-3。
 - RTX 3090 属于 Ampere，计算能力为 8.6。
+- NVIDIA 驱动版本为 530.30.02，`nvidia-smi` 显示 CUDA 12.1。
+- Conda 环境内 PyTorch CUDA runtime 和 `nvcc` 均为 12.6；这与 `nvidia-smi` 显示的版本含义不同。
 - 训练建议先使用 4 卡全参数 BF16 做 10 step 测试；如果显存不足，再切换 LoRA。
 
 ## 当前 Python 环境
@@ -296,8 +298,7 @@ wandb login
 
 ```text
 Project: easy_r1
-Run: qwen2_5_vl_3b_geo_grpo_a40_bf16
+Run: qwen2_5_vl_3b_geo_grpo_3090_bf16
 ```
 
-虽然实验名中仍包含 `a40`，但不影响 RTX 3090 训练；后续可以通过
-`EXPERIMENT_NAME` 环境变量覆盖。
+可以通过 `EXPERIMENT_NAME` 环境变量覆盖默认实验名。

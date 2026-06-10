@@ -22,7 +22,7 @@ TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}
 VAL_FREQ=${VAL_FREQ:-5}
 SAVE_FREQ=${SAVE_FREQ:-5}
 LOGGER=${LOGGER:-"['file','wandb']"}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen2_5_vl_3b_geo_grpo_a40_bf16}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen2_5_vl_3b_geo_grpo_3090_bf16}
 
 python3 -m verl.trainer.main \
     config=examples/config.yaml \

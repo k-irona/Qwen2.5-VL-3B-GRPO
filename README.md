@@ -6,7 +6,8 @@ This repository reproduces the GRPO training workflow for
 [Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct)
 on the [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) dataset.
 It is built on [EasyR1](https://github.com/hiyouga/EasyR1), with a training
-configuration optimized for two NVIDIA A40 48 GB GPUs.
+configuration validated on four NVIDIA GeForce RTX 3090 24 GB GPUs selected
+from an eight-GPU server.
 
 The default experiment uses full-parameter BF16 training, vLLM rollout,
 FSDP, rule-based rewards, Weights & Biases tracking, local logging, automatic
@@ -33,7 +34,7 @@ Main components:
 - Algorithm: GRPO
 - Precision: BF16
 - Training mode: full-parameter fine-tuning
-- Distributed strategy: FSDP on two GPUs
+- Distributed strategy: FSDP on four GPUs
 - Rollout engine: vLLM
 - Reward: answer accuracy and response format
 - Tracking: local JSONL logs and Weights & Biases
@@ -44,15 +45,18 @@ Main components:
 - Python 3.9+
 - NVIDIA GPUs with BF16 support
 - CUDA environment compatible with PyTorch, FlashAttention, and vLLM
-- Two A40 48 GB GPUs are the default target
+- Server: 8 x NVIDIA GeForce RTX 3090 24 GB
+- Training devices: GPU 0-3 (`CUDA_VISIBLE_DEVICES=0,1,2,3`)
+- NVIDIA driver: 530.30.02 (`nvidia-smi` reports CUDA 12.1)
+- Conda environment: PyTorch 2.8.0 cu126 with CUDA Toolkit 12.6
 
 The upstream EasyR1 hardware table estimates that Qwen2.5-VL-3B full
 fine-tuning requires `1 x 40 GB` in BF16. Actual memory usage depends on image
 resolution, prompt length, response length, and rollout settings.
 
-For the verified A40 environment based on Python 3.10, PyTorch 2.8.0 cu126,
+For the verified RTX 3090 environment based on Python 3.10, PyTorch 2.8.0 cu126,
 vLLM 0.11.0, and FlashAttention 2.8.3, see
-[A40_ENVIRONMENT_SETUP_ZH.md](A40_ENVIRONMENT_SETUP_ZH.md).
+[RTX3090_ENVIRONMENT_SETUP_ZH.md](RTX3090_ENVIRONMENT_SETUP_ZH.md).
 
 ## Installation
 
@@ -90,11 +94,11 @@ Log in once if you want online visualization:
 wandb login
 ```
 
-Run a 10-step smoke test on physical GPUs 4 and 5:
+Run a 10-step smoke test on four RTX 3090 GPUs:
 
 ```bash
-CUDA_VISIBLE_DEVICES=4,5 \
-N_GPUS=2 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+N_GPUS=4 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh \
 trainer.max_steps=10
 ```
@@ -102,12 +106,12 @@ trainer.max_steps=10
 Start the full experiment:
 
 ```bash
-CUDA_VISIBLE_DEVICES=4,5 \
-N_GPUS=2 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+N_GPUS=4 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
-The selected physical GPUs are remapped to logical devices `0,1` inside the
+The selected physical GPUs are remapped to logical devices `0,1,2,3` inside the
 training process. With the current filtered Geometry3K dataset, the training
 dataloader contains 65 steps per epoch, so the default 15 epochs run for about
 975 steps. Always use the `Total training steps` value printed at startup as
@@ -117,7 +121,7 @@ the authoritative count.
 
 | Parameter | Default | Description |
 | --- | ---: | --- |
-| `N_GPUS` | 2 | Number of training GPUs |
+| `N_GPUS` | 2 | Script default; set to `4` for the validated RTX 3090 setup |
 | `ROLLOUT_BATCH_SIZE` | 32 | Prompts collected for each rollout batch |
 | `GLOBAL_BATCH_SIZE` | 16 | Actor update minibatch size |
 | `MICRO_BATCH_SIZE_UPDATE` | 1 | Per-device micro batch size for actor updates |
@@ -135,13 +139,13 @@ the authoritative count.
 | `VAL_FREQ` | 5 | Validation interval in steps |
 | `SAVE_FREQ` | 5 | Checkpoint interval in steps |
 | `LOGGER` | `['file','wandb']` | Enabled logging backends |
-| `EXPERIMENT_NAME` | `qwen2_5_vl_3b_geo_grpo_a40_bf16` | Run and checkpoint directory name |
+| `EXPERIMENT_NAME` | `qwen2_5_vl_3b_geo_grpo_3090_bf16` | Run and checkpoint directory name |
 
 All values can be overridden through environment variables:
 
 ```bash
-CUDA_VISIBLE_DEVICES=4,5 \
-N_GPUS=2 \
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+N_GPUS=4 \
 ROLLOUT_BATCH_SIZE=16 \
 GLOBAL_BATCH_SIZE=8 \
 MAX_RESPONSE_LENGTH=384 \
@@ -160,12 +164,14 @@ trainer.val_freq=25
 
 ## Automatic GPU Waiting
 
-The waiting script monitors GPU memory and utilization. It starts training
-after the same two GPUs remain free for three consecutive checks.
+The waiting script monitors GPU memory and utilization. For the current setup,
+it starts training after the same four GPUs remain free for three consecutive
+checks.
 
-Wait for any two GPUs:
+Wait for any four GPUs:
 
 ```bash
+NUM_GPUS=4 \
 nohup bash scripts/wait_for_gpus_and_train.sh \
   > wait_for_gpus.log 2>&1 &
 ```
@@ -174,6 +180,7 @@ Only select GPUs from a specified set:
 
 ```bash
 GPU_CANDIDATES=4,5,6,7 \
+NUM_GPUS=4 \
 nohup bash scripts/wait_for_gpus_and_train.sh \
   > wait_for_gpus.log 2>&1 &
 ```
@@ -210,7 +217,7 @@ The default logger configuration is:
 After training starts, open [wandb.ai](https://wandb.ai/) and find:
 
 - Project: `easy_r1`
-- Run: `qwen2_5_vl_3b_geo_grpo_a40_bf16`
+- Run: `qwen2_5_vl_3b_geo_grpo_3090_bf16`
 
 Recommended metrics:
 
@@ -230,20 +237,20 @@ baseline and trained-model results.
 Training logs are stored in:
 
 ```text
-checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16/
 ```
 
 Generate the local report:
 
 ```bash
 python3 scripts/visualize_training.py \
-  checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16
+  checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16
 ```
 
 Output:
 
 ```text
-checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/training_report.html
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16/training_report.html
 ```
 
 The report includes metric curves and side-by-side validation generations
@@ -263,7 +270,7 @@ checkpoint to Hugging Face format with:
 
 ```bash
 python3 scripts/model_merger.py \
-  --local_dir checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/global_step_<STEP>/actor
+  --local_dir checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16/global_step_<STEP>/actor
 ```
 
 The trainer automatically searches for the latest checkpoint in the same

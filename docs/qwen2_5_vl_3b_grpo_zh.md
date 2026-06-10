@@ -6,18 +6,20 @@
 
 ```bash
 wandb login
+CUDA_VISIBLE_DEVICES=0,1,2,3 N_GPUS=4 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh
 ```
 
-默认按 2 张 A40 48GB 的全参数 BF16 配置运行。日志同时写入 WandB 和：
+当前按 4 张 RTX 3090 24GB 的全参数 BF16 配置运行。日志同时写入 WandB 和：
 
 ```text
-checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16/
 ```
 
 首次排查流程时，建议先运行 10 步：
 
 ```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 N_GPUS=4 \
 TOTAL_EPOCHS=1 VAL_FREQ=5 SAVE_FREQ=5 \
 bash examples/qwen2_5_vl_3b_geo3k_grpo.sh trainer.max_steps=10
 ```
@@ -51,8 +53,9 @@ bash examples/qwen2_5_vl_3b_geo3k_grpo.sh trainer.max_steps=10
 
 脚本使用 `worker.actor.fsdp.torch_dtype=bf16` 和
 `worker.actor.optim.strategy=adamw_bf16` 开启 BF16 全参数训练。仓库给出的
-3B BF16 资源估算是 1 张 40GB GPU，而 AMP 需要 4 张 40GB GPU。A40 属于
-Ampere 架构并支持 BF16，但实际峰值仍受图像尺寸和生成长度影响。
+3B BF16 资源估算是 1 张 40GB GPU，而 AMP 需要 4 张 40GB GPU。RTX 3090
+属于 Ampere 架构并支持 BF16。当前 4 卡实测每卡显存峰值约为 13.5GB
+allocated、18.9GB reserved，但实际峰值仍受图像尺寸和生成长度影响。
 
 ## 3. 训练前后对比
 
@@ -67,13 +70,13 @@ WandB 中打开 run，查看上述曲线和 `val/generations` 表格即可。需
 
 ```bash
 python3 scripts/visualize_training.py \
-  checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16
+  checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16
 ```
 
 输出文件：
 
 ```text
-checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_a40_bf16/training_report.html
+checkpoints/easy_r1/qwen2_5_vl_3b_geo_grpo_3090_bf16/training_report.html
 ```
 
 该报告包含训练曲线，以及 step 0 和最终 step 在相同验证问题上的回答与得分对照。
@@ -90,17 +93,19 @@ Geometry3K 的仓库基线是 Qwen2.5-VL-3B 测试准确率约 `0.24 -> 0.38`，
 
 ## 5. 等待 GPU 空闲后自动训练
 
-等待任意两张 GPU 连续 3 分钟空闲后启动：
+等待任意四张 GPU 连续 3 分钟空闲后启动：
 
 ```bash
+NUM_GPUS=4 \
 nohup bash scripts/wait_for_gpus_and_train.sh \
   > wait_for_gpus.log 2>&1 &
 ```
 
-只允许从 GPU 4、5、6、7 中选择两张：
+只允许从 GPU 4、5、6、7 中选择四张：
 
 ```bash
 GPU_CANDIDATES=4,5,6,7 \
+NUM_GPUS=4 \
 nohup bash scripts/wait_for_gpus_and_train.sh \
   > wait_for_gpus.log 2>&1 &
 ```
