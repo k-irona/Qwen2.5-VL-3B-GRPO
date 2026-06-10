@@ -49,7 +49,10 @@ class FileGenerationLogger(GenerationLogger):
     def log(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         with open(os.path.join(self.config["trainer"]["save_checkpoint_path"], "generations.log"), "a") as f:
             for inp, out, lab, score in samples:
-                f.write(f"[prompt] {inp}\n[output] {out}\n[ground_truth] {lab}\n[score] {score}\n\n")
+                f.write(
+                    f"[step] {step}\n[prompt] {inp}\n[output] {out}\n"
+                    f"[ground_truth] {lab}\n[score] {score}\n\n"
+                )
 
 
 @dataclass
