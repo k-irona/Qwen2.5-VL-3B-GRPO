@@ -56,7 +56,7 @@ resolution, prompt length, response length, and rollout settings.
 
 For the verified RTX 3090 environment based on Python 3.10, PyTorch 2.8.0 cu126,
 vLLM 0.11.0, and FlashAttention 2.8.3, see
-[RTX3090_ENVIRONMENT_SETUP_ZH.md](RTX3090_ENVIRONMENT_SETUP_ZH.md).
+[docs/easyr1_conda_environment_zh.md](docs/easyr1_conda_environment_zh.md).
 
 ## Installation
 
@@ -322,7 +322,9 @@ examples/reward_function/r1v.py       Accuracy and format reward
 examples/format_prompt/r1v.jinja      Required reasoning/answer template
 scripts/wait_for_gpus_and_train.sh    Automatic GPU waiting and launch
 scripts/visualize_training.py         Local HTML report generator
-docs/qwen2_5_vl_3b_grpo_zh.md         Additional Chinese tuning notes
+docs/easyr1_conda_environment_zh.md   Conda environment setup guide
+docs/qwen2_5_vl_3b_grpo_training_analysis_zh.md
+                                      Chinese training analysis
 ```
 
 ## Acknowledgements

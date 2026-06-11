@@ -53,7 +53,7 @@ EasyR1 上游资源表估算 Qwen2.5-VL-3B 全参数 BF16 训练最低约需
 
 基于 Python 3.10、PyTorch 2.8.0 cu126、vLLM 0.11.0 和
 FlashAttention 2.8.3 的已验证 RTX 3090 环境配置参见
-[RTX3090_ENVIRONMENT_SETUP_ZH.md](RTX3090_ENVIRONMENT_SETUP_ZH.md)。
+[docs/easyr1_conda_environment_zh.md](docs/easyr1_conda_environment_zh.md)。
 
 ## 安装
 
@@ -312,7 +312,9 @@ examples/reward_function/r1v.py       准确率和格式奖励
 examples/format_prompt/r1v.jinja      推理与答案格式模板
 scripts/wait_for_gpus_and_train.sh    自动等待 GPU 并启动训练
 scripts/visualize_training.py         本地 HTML 报告生成器
-docs/qwen2_5_vl_3b_grpo_zh.md         补充调参说明
+docs/easyr1_conda_environment_zh.md   Conda 环境配置
+docs/qwen2_5_vl_3b_grpo_training_analysis_zh.md
+                                      GRPO 训练分析
 ```
 
 ## 致谢
