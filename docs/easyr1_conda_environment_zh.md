@@ -6,13 +6,14 @@
 
 ### 使用集群
 NVIDIA GeForce RTX 3090 8x，训练使用 GPU 0-3
-- GPU memory：24GB per GPU
-- GPU architecture：Ampere
-- Compute capability：8.6
-- NVIDIA Driver Version：530.30.02
-- `nvidia-smi` CUDA Version：12.1
+-  GPU memory：24GB per GPU
+-  GPU architecture：Ampere
+-  Compute capability：8.6
+-  NVIDIA Driver Version：530.30.02
+-  `nvidia-smi` CUDA Version：12.1
 
-本文实际使用 4 张 RTX 3090、PyTorch 2.8.0 cu126、Conda CUDA Toolkit 12.6、vLLM 0.11.0 和 FlashAttention 2.8.3。`nvidia-smi` 显示的 CUDA 12.1 表示驱动报告的 CUDA 兼容能力，不是当前 Conda 环境中 PyTorch runtime 或 `nvcc` 的版本；后两者均为 12.6。驱动 530.30.02 满足 CUDA 12.x minor version compatibility 的最低要求。
+本文实际使用 4 张 RTX 3090、PyTorch 2.8.0 cu126、Conda CUDA Toolkit 12.6、vLLM 0.11.0 和 FlashAttention 2.8.3。
+`nvidia-smi` 显示的 CUDA 12.1 表示驱动报告的 CUDA 兼容能力，不是当前 Conda 环境中 PyTorch runtime 或 `nvcc` 的版本；后两者均为 12.6。驱动 530.30.02 满足 CUDA 12.x minor version compatibility 的最低要求。
 
 检查集群：
 ```
@@ -52,7 +53,14 @@ CUDA: 12.6
 available: True
 ```
 ### 安装 CUDA Toolkit
-FlashAttention 源码编译要求 nvcc 与 PyTorch CUDA 一致：
+FlashAttention 源码编译不仅需要安装 PyTorch，还需要安装 CUDA Toolkit，一定要注意 **nvcc 与 PyTorch CUDA 版本保持一致**，否则很容易出现兼容问题。
+这里容易产生一个误区：虽然 `torch==2.8.0+cu126` 已经包含 CUDA Runtime，可以正常调用 GPU 进行训练，但 FlashAttention 需要在本机编译 CUDA 扩展，因此还需要额外提供：
+-  CUDA 编译器（`nvcc`）
+-  CUDA 头文件（如 `cuda_runtime.h`、`cuda_bf16.h`）
+-  CUDA 开发库
+
+这些组件由 CUDA Toolkit 提供，而不是 PyTorch wheel 提供。
+因此，即使 PyTorch 已经能够正常识别 GPU，源码编译 FlashAttention 时仍然需要单独安装 CUDA Toolkit。
 ```
 conda install -y -c nvidia cuda-toolkit=12.6
 export CUDA_HOME="$CONDA_PREFIX"
@@ -66,7 +74,7 @@ nvcc --version
 conda install -y -c nvidia cuda-nvcc=12.6
 ```
 不要将 `$CONDA_PREFIX/lib` 永久加入 `LD_LIBRARY_PATH`，否则可能导致系统 `curl`、`bash` 出现 `libffi` 或 `libtinfo` 错误。
-### 安装项目依赖
+### 安装其他依赖
 ```
 cd "$REPO_DIR"
 pip install vllm==0.11.0 hydra-core \
@@ -88,7 +96,18 @@ vllm==0.11.0
 transformers>=4.54.0,<5.0.0
 ```
 ### 安装 FlashAttention
+最后我们来安装最麻烦的 FlashAttention，若遇到问题，可以参考以下 FlashAttention 编译失败案例表：
+
+| 报错                            | 常见原因                      | 解决方式                         |
+| ----------------------------- | ------------------------- | ---------------------------- |
+| `GLIBC_2.32 not found`        | wheel 依赖较新 glibc          | 改源码编译                        |
+| `cuda_bf16.h: No such file`   | CUDA include 路径没找到        | 设置 `CUDA_INCLUDE` / `CPATH`  |
+| `No space left on device`     | `/tmp` 空间不足               | 设置 `TMPDIR=/data/...`        |
+| `ninja: build stopped`        | 编译并行过高/OOM                | 降低 `MAX_JOBS`                |
+| `unsupported architecture 86` | flash-attn 2.8.3 不接受 `86` | 用 `FLASH_ATTN_CUDA_ARCHS=80` |
 目标版本：`flash-attn==2.8.3`
+预编译 wheel 安装速度最快，无需本地编译 CUDA 扩展，因此优先尝试 wheel 安装。
+只有当 glibc、ABI 或平台兼容性问题导致 wheel 无法使用时，再退回源码编译。
 先尝试官方预编译 wheel：
 ```
 ABI_FLAG=$(python -c "import torch; print('TRUE' if torch._C._GLIBCXX_USE_CXX11_ABI else 'FALSE')")
@@ -100,7 +119,7 @@ env -u LD_LIBRARY_PATH /usr/bin/curl -L "$FLASH_URL" \
 pip install "$WORK_ROOT/wheels/$FLASH_WHEEL"
 python -c "import flash_attn; print(flash_attn.__version__)"
 ```
-如果出现 `GLIBC_2.32 not found`、未定义符号或 wheel 不存在，则在本机源码编译：
+由于 wheel 依赖较新的 glibc，如果出现 `GLIBC_2.32 not found`、未定义符号或 wheel 不存在，则需要在本机源码编译：
 ```
 pip uninstall -y flash-attn
 export BUILD_TMP=$WORK_ROOT/tmp/flash-attn
@@ -126,8 +145,11 @@ pip install flash-attn==2.8.3 \
 --no-build-isolation \
 --no-cache-dir
 ```
-RTX 3090 是 Ampere。FlashAttention 2.8.3 的 Ampere 构建使用 `FLASH_ATTN_CUDA_ARCHS=80`。源码编译建议准备至少 30GB 临时空间，不要使用空间不足的系统 `/tmp`。
-另一个终端查看编译进度：
+
+RTX 3090 的 compute capability 是 8.6，但 FlashAttention 2.8.3 的 `FLASH_ATTN_CUDA_ARCHS` 构建选项并不接受 `86`。
+该版本在官方 `setup.py` 中将 Ampere 内核统一配置为 `80`，因此这里应使用 `FLASH_ATTN_CUDA_ARCHS=80`；生成的 `sm_80` 内核可在 RTX 3090 这类 `sm_86` Ampere GPU 上运行。
+源码编译建议准备 **至少 30GB 临时空间**，不要使用空间不足的系统 `/tmp`。编译过程中会生成大量 CUDA 中间文件（`.o`、PTX、fatbin 等），磁盘占用峰值可能达到数十 GB。
+可以开另一个终端查看编译进度：
 ```
 watch -n 2 "
 echo 'Processes:'
@@ -138,11 +160,13 @@ echo 'Storage:'
 du -sh '$BUILD_TMP' 2>/dev/null
 "
 ```
+`MAX_JOBS` 可根据机器 CPU 核数和可用内存调整。如果编译过程中出现 OOM、`ninja: build stopped` 或系统负载过高，可尝试降低至 8 或 16。
 编译完成后验证：
 ```
 python -c "import torch,flash_attn; print(torch.__version__); print(torch.version.cuda); print(flash_attn.__version__)"
 rm -rf "$BUILD_TMP"
 ```
+如果能够正常导入 `flash_attn` 且未出现 undefined symbol、GLIBC 或 CUDA Runtime 相关错误，则说明安装成功。
 ### 完整环境验证
 ```
 pip check
@@ -240,13 +264,6 @@ ssh -L 8265:127.0.0.1:8265 <username>@<cluster-host>
 ```
 http://127.0.0.1:8265
 ```
-重点关注：
-- `val/accuracy_reward`
-- `val/reward_score`
-- `actor/ppo_kl`
-- `actor/grad_norm`
-- `response_length/clip_ratio`
-- `perf/max_memory_allocated_gb`
 ### 显存不足
 依次降低：
 ```
