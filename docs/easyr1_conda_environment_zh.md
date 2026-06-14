@@ -1,8 +1,6 @@
 # 使用 Conda 配置 EasyR1 训练环境
 
-本文记录 EasyR1 在 RTX 3090 集群上的 Conda 环境配置流程。完成环境配置后，
-实际实验过程与指标解读参见
-[《Qwen2.5-VL-3B GRPO 训练分析》](qwen2_5_vl_3b_grpo_training_analysis_zh.md)。
+本文记录 EasyR1 在 RTX 3090 集群上的 Conda 环境配置流程。
 
 ### 使用集群
 NVIDIA GeForce RTX 3090 8x，训练使用 GPU 0-3
